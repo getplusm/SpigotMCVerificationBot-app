@@ -10,5 +10,5 @@ services:
     environment:
       - JAVA_OPTS=-Xmx512m -Xms256m
     volumes:
-      - ./config:/app/config
-    command: ["-Dconfig.file=/app/config/config.properties"]
+      - ./config.properties:/app/config/config.properties  # Монтируем config.properties
+    command: ["java", "-jar", "bot.jar", "-Dconfig.file=/app/config/config.properties"]
