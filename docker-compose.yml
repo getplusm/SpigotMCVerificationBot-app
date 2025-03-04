@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  spigotmc-verification-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: spigotmc-verification-bot
+    restart: unless-stopped
+    environment:
+      - JAVA_OPTS=-Xmx512m -Xms256m
+    volumes:
+      - ./config:/app/config
+    command: ["-Dconfig.file=/app/config/config.properties"]
