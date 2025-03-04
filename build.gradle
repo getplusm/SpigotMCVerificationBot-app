@@ -17,7 +17,6 @@ repositories {
 
 dependencies {
     implementation 'net.dv8tion:JDA:5.0.0-beta.20'
-    implementation 'org.jsoup:jsoup:1.17.2'
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     implementation 'org.json:json:20231013'
     implementation 'org.slf4j:slf4j-simple:1.7.36'
@@ -32,7 +31,7 @@ application {
 }
 
 shadowJar {
-    archiveFileName = rootProject.name + '.jar'
+    archiveFileName.set(rootProject.name + '-' + project.version + '.jar')
     manifest {
         attributes 'Main-Class': 't.me.p1azmer.discord.verify.Main'
     }
