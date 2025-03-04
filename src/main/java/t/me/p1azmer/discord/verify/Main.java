@@ -7,9 +7,11 @@ import lombok.extern.slf4j.Slf4j;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.entities.Guild;
+import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.entities.Role;
 import net.dv8tion.jda.api.entities.User;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
+import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.interactions.commands.OptionMapping;
 import net.dv8tion.jda.api.interactions.commands.OptionType;
@@ -57,7 +59,7 @@ public class Main extends ListenerAdapter {
             jda = initializeJDA();
             registerCommands(jda);
             addShutdownHook();
-            log.info("Bot is ready!");
+            log.info("Bot successfully started!");
         } catch (Exception exception) {
             log.error("Got an exception while starting the bot", exception);
         }
@@ -103,9 +105,32 @@ public class Main extends ListenerAdapter {
         }
     }
 
-    private static @NotNull JDA initializeJDA() throws Exception {
+    @Override
+    public void onMessageReceived(@NotNull MessageReceivedEvent event) {
+        if (!Boolean.getBoolean(CONFIG.getProperty("delete.messages.in.channel"))){
+            return;
+        }
+        if (!isCorrectGuild(event.getGuild()) || !isCorrectChannel(event.getChannel().getId())) {
+            return;
+        }
+
+        Message message = event.getMessage();
+        String content = message.getContentRaw();
+        User author = event.getAuthor();
+
+        if (author.isBot() || content.startsWith("/") || hasAdminRole(event)) {
+            return;
+        }
+
+        message.delete().queue(
+                success -> log.info("Deleted message from {}: {}", author.getName(), content),
+                failure -> log.error("Can't delete message from {}", author.getName(), failure)
+        );
+    }
+
+    private static JDA initializeJDA() throws Exception {
         String token = CONFIG.getProperty(BOT_TOKEN_KEY);
-        return JDABuilder.create(token, EnumSet.of(GatewayIntent.GUILD_MEMBERS))
+        return JDABuilder.create(token, EnumSet.of(GatewayIntent.GUILD_MEMBERS, GatewayIntent.MESSAGE_CONTENT, GatewayIntent.GUILD_MESSAGES))
                 .disableCache(CacheFlag.ACTIVITY, CacheFlag.VOICE_STATE, CacheFlag.EMOJI, CacheFlag.STICKER,
                         CacheFlag.CLIENT_STATUS, CacheFlag.ONLINE_STATUS, CacheFlag.SCHEDULED_EVENTS)
                 .addEventListeners(new Main())
