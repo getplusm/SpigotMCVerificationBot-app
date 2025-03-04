@@ -2,6 +2,7 @@ package t.me.p1azmer.discord.verify;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import lombok.Cleanup;
 import lombok.extern.slf4j.Slf4j;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
@@ -18,6 +19,7 @@ import net.dv8tion.jda.api.utils.cache.CacheFlag;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
+import okhttp3.ResponseBody;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.json.JSONObject;
@@ -46,16 +48,41 @@ public class Main extends ListenerAdapter {
     static final String CODE_FORMAT_KEY = "generation.code.name";
     static final int CODE_LENGTH = 6;
     static final int INVALID_ID = -1;
+    static JDA jda;
 
     public static void main(String[] args) {
         try {
             loadConfig();
-            JDA jda = initializeJDA();
+            jda = initializeJDA();
             registerCommands(jda);
+            addShutdownHook();
             log.info("Bot is ready!");
         } catch (Exception exception) {
             log.error("Got an exception while starting the bot", exception);
         }
+    }
+
+    private static void unload() {
+        shutdownJDA();
+        log.info("Bot has been unloaded!");
+    }
+
+    private static void shutdownJDA() {
+        if (jda == null) return;
+
+        jda.shutdown();
+        try {
+            if (!jda.awaitShutdown(5, TimeUnit.SECONDS)) {
+                jda.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            jda.shutdownNow();
+        }
+    }
+
+    private static void addShutdownHook() {
+        Runtime.getRuntime().addShutdownHook(new Thread(Main::unload, "Shutdown Thread"));
     }
 
     @Override
@@ -237,8 +264,10 @@ public class Main extends ListenerAdapter {
                 log.error("API request failed: HTTP {}", response.code());
                 return null;
             }
-            assert response.body() != null;
-            return response.body().string();
+            @Cleanup ResponseBody body = response.body();
+            if (body == null) return null;
+
+            return body.string();
         }
     }
 
