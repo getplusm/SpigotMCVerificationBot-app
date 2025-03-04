@@ -46,6 +46,7 @@ public class Main extends ListenerAdapter {
     static final String ASSIGN_ROLE_IDS_KEY = "assign.role.ids";
     static final String BOT_TOKEN_KEY = "bot.token";
     static final String CODE_FORMAT_KEY = "generation.code.name";
+    static final String GUILD_ID_KEY = "guild.id";
     static final int CODE_LENGTH = 6;
     static final int INVALID_ID = -1;
     static JDA jda;
@@ -112,17 +113,43 @@ public class Main extends ListenerAdapter {
                 .awaitReady();
     }
 
-    private static void registerCommands(@NotNull JDA jda) {
-        jda.updateCommands().addCommands(
-                Commands.slash("verify", "Start verifying your SpigotMC account")
-                        .addOption(OptionType.STRING, "username", "Your username on SpigotMC", true),
-                Commands.slash("done", "Complete your SpigotMC verification"),
-                Commands.slash("reload", "Reload bot configuration")
-        ).queue();
+    private static void registerCommands(JDA jda) {
+        String guildId = CONFIG.getProperty(GUILD_ID_KEY);
+        if (guildId != null && !guildId.isEmpty()) {
+            Guild guild = jda.getGuildById(guildId);
+            if (guild != null) {
+                guild.updateCommands().addCommands(
+                        Commands.slash("verify", "Start verifying your SpigotMC account")
+                                .addOption(OptionType.STRING, "username", "Your username on SpigotMC", true),
+                        Commands.slash("done", "Complete your SpigotMC verification"),
+                        Commands.slash("reload", "Reload bot configuration")
+                ).queue();
+            } else {
+                log.warn("Guild with {} ID not found. Commands not registered.", guildId);
+            }
+        } else {
+            log.warn("Guild ID not found in configuration file. Command not registered.");
+        }
     }
 
     private static boolean isCorrectChannel(@NotNull SlashCommandInteractionEvent event) {
         return event.getChannel().getId().equals(CONFIG.getProperty(CHANNEL_ID_KEY));
+    }
+
+    private static boolean isCorrectChannel(@NotNull String channelId) {
+        return channelId.equals(CONFIG.getProperty(CHANNEL_ID_KEY));
+    }
+
+    private static boolean isCorrectGuild(@Nullable Guild guild) {
+        String guildId = CONFIG.getProperty(GUILD_ID_KEY);
+        return guild != null && guild.getId().equals(guildId);
+    }
+
+    private static boolean hasAdminRole(@NotNull MessageReceivedEvent event) {
+        if (event.getMember() == null) return false;
+        String adminRoleId = CONFIG.getProperty(ADMIN_ROLE_ID_KEY);
+        return event.getMember().getRoles().stream()
+                .anyMatch(role -> role.getId().equals(adminRoleId));
     }
 
     private static void handleVerify(@NotNull SlashCommandInteractionEvent event, @NotNull User user) {
