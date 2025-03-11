@@ -1,0 +1,58 @@
+# Discord bot token
+bot:
+  token: "bot_token"
+
+# ID of the guild (server) where the bot operates
+guild:
+  id: "1234"
+
+# ID of the channel where commands are allowed
+channel:
+  id: "1234"
+
+# ID of the admin role
+admin:
+  role:
+    id: "1234"
+
+# ID of the verification role (used to check if user is already verified)
+verify:
+  role:
+    id: "1234"
+
+# IDs of roles to assign upon successful verification
+assign:
+  roles:
+  - "1234"
+  - "1234"
+
+# Verification code format
+generation:
+  code:
+    name: "discord.gg/{generated_code}/ajnPb3fdKq"
+
+# Whether to delete non-command messages in the channel
+delete-messages-in-channel: true
+
+# Messages for users
+messages:
+  verify:
+    instruction: |
+      To verify your SpigotMC account, follow these steps:
+      1. Go to your profile settings on [`SpigotMC`](https://www.spigotmc.org/account/contact-details)
+      2. In the **`Discord`** field, enter: **`{code}`**
+      3. Then use the `/done` command in this channel to complete verification.
+    success: "Verification successful! Your SpigotMC account has been confirmed."
+    failure: "Verification failed. Ensure the Discord field on SpigotMC is set to: `{code}`.\nCurrent value in your profile: `{actual_info}`."
+    discord:
+      identifier:
+        tag-not-found: "Verification failed. No Discord identifier found in your profile!"
+        user-not-found: "Verification failed. User `{username}` not found on SpigotMC!"
+    error: "An error occurred during verification. Ensure the nickname is correct and the profile is accessible."
+    usage: "Use the command in the format: `/verify <spigotmc-username>`"
+    already-verified: "You are already verified!"
+  done:
+    no-verify: "Please use `/verify <username>` first to start the verification process!"
+  reload:
+    success: "Configuration successfully reloaded!"
+    no-permission: "You do not have permission to execute this command!"
