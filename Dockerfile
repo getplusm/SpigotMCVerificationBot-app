@@ -1,5 +1,6 @@
-FROM openjdk:17-jdk-slim
+FROM eclipse-temurin:17-jdk
 WORKDIR /app
-COPY build/*.jar /app/SpigotMCVerificationBot.jar
-ENTRYPOINT ["java", "-Dfile.encoding=UTF-8", "-jar", "SpigotMCVerificationBot.jar"]
-CMD []
+COPY SpigotMCVerificationBot.jar .
+RUN mkdir -p /app/config
+COPY config.yml /app/config/
+CMD ["java", "-jar", "SpigotMCVerificationBot.jar"]

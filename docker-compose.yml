@@ -1,14 +1,12 @@
-version: '3.8'
+version: "3.8"
 
 services:
   spigotmc-verification-bot:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: spigotmc-verification-bot
+    container_name: SpigotMCVerificationBot
+    build: .
     restart: unless-stopped
-    environment:
-      - JAVA_OPTS=-Xmx512m -Xms256m
     volumes:
-      - ./config.properties:/app/config/config.properties  # Монтируем config.properties
-    command: ["java", "-jar", "bot.jar", "-Dconfig.file=/app/config/config.properties"]
+      - ./config.yml:/app/config/config.yml:ro
+
+x-remove-image: &remove-image
+  remove_images: all
