@@ -2,7 +2,6 @@ package t.me.p1azmer.discord.verify;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
-import lombok.Cleanup;
 import lombok.extern.slf4j.Slf4j;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
@@ -18,40 +17,39 @@ import net.dv8tion.jda.api.interactions.commands.OptionType;
 import net.dv8tion.jda.api.interactions.commands.build.Commands;
 import net.dv8tion.jda.api.requests.GatewayIntent;
 import net.dv8tion.jda.api.utils.cache.CacheFlag;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.Response;
-import okhttp3.ResponseBody;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.json.JSONObject;
+import org.yaml.snakeyaml.Yaml;
+import t.me.p1azmer.discord.verify.config.Config;
+import t.me.p1azmer.discord.verify.models.Spigot;
+import t.me.p1azmer.discord.verify.utils.FileUtils;
 
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.InputStream;
-import java.util.Arrays;
 import java.util.EnumSet;
-import java.util.Properties;
-import java.util.Random;
+import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j(topic = "[Bot]")
 public class Main extends ListenerAdapter {
 
-    static final Properties CONFIG = new Properties();
-    static final Cache<String, String> VERIFICATION_CODES = Caffeine.newBuilder()
+    private static final Cache<String, String> VERIFICATION_CODES = Caffeine.newBuilder()
             .expireAfterWrite(10, TimeUnit.MINUTES)
             .build();
-    static final OkHttpClient CLIENT = new OkHttpClient();
-    static final Random RANDOM = new Random();
-    static final String CHANNEL_ID_KEY = "channel.id";
-    static final String ADMIN_ROLE_ID_KEY = "admin.role.id";
-    static final String VERIFY_ROLE_ID_KEY = "verify.role.id";
-    static final String ASSIGN_ROLE_IDS_KEY = "assign.role.ids";
-    static final String BOT_TOKEN_KEY = "bot.token";
-    static final String CODE_FORMAT_KEY = "generation.code.name";
-    static final String GUILD_ID_KEY = "guild.id";
-    static final int CODE_LENGTH = 6;
-    static final int INVALID_ID = -1;
-    static JDA jda;
+    private static final ThreadLocalRandom RANDOM = ThreadLocalRandom.current();
+    private static final String GUILD_ID_KEY = "guild.id";
+    private static final String CHANNEL_ID_KEY = "channel.id";
+    private static final String ADMIN_ROLE_ID_KEY = "admin.role.id";
+    private static final String VERIFY_ROLE_ID_KEY = "verify.role.id";
+    private static final String ASSIGN_ROLES_KEY = "assign.roles";
+    private static final String BOT_TOKEN_KEY = "bot.token";
+    private static final String CODE_FORMAT_KEY = "generation.code.name";
+    private static final String DELETE_MESSAGES_KEY = "delete-messages-in-channel";
+    private static final int CODE_LENGTH = 6;
+    private static JDA jda;
 
     public static void main(String[] args) {
         try {
@@ -65,9 +63,8 @@ public class Main extends ListenerAdapter {
         }
     }
 
-    private static void unload() {
-        shutdownJDA();
-        log.info("Bot has been unloaded!");
+    private static void addShutdownHook() {
+        Runtime.getRuntime().addShutdownHook(new Thread(Main::unload, "Shutdown Thread"));
     }
 
     private static void shutdownJDA() {
@@ -84,15 +81,73 @@ public class Main extends ListenerAdapter {
         }
     }
 
-    private static void addShutdownHook() {
-        Runtime.getRuntime().addShutdownHook(new Thread(Main::unload, "Shutdown Thread"));
+    private static void unload() {
+        shutdownJDA();
+        log.info("Bot has been unloaded!");
+    }
+
+    private static void loadConfig() {
+        File file = new File("config/config.yml");
+        FileUtils.createFile(file);
+
+        try (InputStream input = Main.class.getResourceAsStream("/config.yml")) {
+            if (input != null) {
+                FileUtils.copyFile(input, file);
+                log.info("Successfully copied default config.yml");
+            } else {
+                log.error("Resource 'config.yml' not found in src/main/resources");
+            }
+        } catch (Exception exception) {
+            log.error("Got an exception while copying default config.yml", exception);
+        }
+
+        try (FileInputStream fileInputStream = new FileInputStream(file)) {
+            Yaml yaml = new Yaml();
+            Config.setConfigMap(yaml.loadAs(fileInputStream, Map.class));
+            log.info("Successfully loaded config.yml");
+        } catch (Exception exception) {
+            log.error("Got an exception while loading config.yml", exception);
+        }
+    }
+
+    private static @NotNull JDA initializeJDA() throws Exception {
+        String token = Config.getConfigString(BOT_TOKEN_KEY);
+        if (token == null || token.trim().isEmpty()) {
+            throw new IllegalStateException("Bot token not specified or empty in config.yml");
+        }
+
+        token = token.trim();
+        log.info("Using bot token: '{}'", token);
+        return JDABuilder.createDefault(token, EnumSet.of(GatewayIntent.GUILD_MEMBERS, GatewayIntent.GUILD_MESSAGES, GatewayIntent.MESSAGE_CONTENT))
+                .disableCache(CacheFlag.ACTIVITY, CacheFlag.VOICE_STATE, CacheFlag.EMOJI, CacheFlag.STICKER,
+                        CacheFlag.CLIENT_STATUS, CacheFlag.ONLINE_STATUS, CacheFlag.SCHEDULED_EVENTS)
+                .addEventListeners(new Main())
+                .build()
+                .awaitReady();
+    }
+
+    private static void registerCommands(@NotNull JDA jda) {
+        String guildId = Config.getConfigString(GUILD_ID_KEY);
+        if (guildId != null && !guildId.isEmpty()) {
+            Guild guild = jda.getGuildById(guildId);
+            if (guild != null) {
+                guild.updateCommands().addCommands(
+                        Commands.slash("verify", "Start verifying your SpigotMC account")
+                                .addOption(OptionType.STRING, "username", "Your username on SpigotMC", true),
+                        Commands.slash("done", "Complete your SpigotMC verification"),
+                        Commands.slash("reload", "Reload bot configuration")
+                ).queue();
+            } else {
+                log.warn("Guild with ID {} not found. Commands not registered.", guildId);
+            }
+        } else {
+            log.warn("Guild ID not specified in config.yml. Commands not registered.");
+        }
     }
 
     @Override
     public void onSlashCommandInteraction(@NotNull SlashCommandInteractionEvent event) {
-        if (!isCorrectChannel(event)) {
-            return;
-        }
+        if (!isCorrectGuild(event.getGuild()) || !isCorrectChannel(event)) return;
 
         event.deferReply(true).queue();
         String commandName = event.getName();
@@ -107,9 +162,9 @@ public class Main extends ListenerAdapter {
 
     @Override
     public void onMessageReceived(@NotNull MessageReceivedEvent event) {
-        if (!Boolean.getBoolean(CONFIG.getProperty("delete.messages.in.channel"))){
-            return;
-        }
+        boolean enabledDeleteMessages = Config.getConfigBoolean(DELETE_MESSAGES_KEY);
+        if (!enabledDeleteMessages) return;
+
         if (!isCorrectGuild(event.getGuild()) || !isCorrectChannel(event.getChannel().getId())) {
             return;
         }
@@ -117,92 +172,61 @@ public class Main extends ListenerAdapter {
         Message message = event.getMessage();
         String content = message.getContentRaw();
         User author = event.getAuthor();
-
-        if (author.isBot() || content.startsWith("/") || hasAdminRole(event)) {
-            return;
-        }
+        if (author.isBot() || content.startsWith("/") || hasAdminRole(event)) return;
 
         message.delete().queue(
                 success -> log.info("Deleted message from {}: {}", author.getName(), content),
-                failure -> log.error("Can't delete message from {}", author.getName(), failure)
+                failure -> log.error("Failed to delete message from {}", author.getName(), failure)
         );
     }
 
-    private static JDA initializeJDA() throws Exception {
-        String token = CONFIG.getProperty(BOT_TOKEN_KEY);
-        return JDABuilder.create(token, EnumSet.of(GatewayIntent.GUILD_MEMBERS, GatewayIntent.MESSAGE_CONTENT, GatewayIntent.GUILD_MESSAGES))
-                .disableCache(CacheFlag.ACTIVITY, CacheFlag.VOICE_STATE, CacheFlag.EMOJI, CacheFlag.STICKER,
-                        CacheFlag.CLIENT_STATUS, CacheFlag.ONLINE_STATUS, CacheFlag.SCHEDULED_EVENTS)
-                .addEventListeners(new Main())
-                .build()
-                .awaitReady();
-    }
-
-    private static void registerCommands(JDA jda) {
-        String guildId = CONFIG.getProperty(GUILD_ID_KEY);
-        if (guildId != null && !guildId.isEmpty()) {
-            Guild guild = jda.getGuildById(guildId);
-            if (guild != null) {
-                guild.updateCommands().addCommands(
-                        Commands.slash("verify", "Start verifying your SpigotMC account")
-                                .addOption(OptionType.STRING, "username", "Your username on SpigotMC", true),
-                        Commands.slash("done", "Complete your SpigotMC verification"),
-                        Commands.slash("reload", "Reload bot configuration")
-                ).queue();
-            } else {
-                log.warn("Guild with {} ID not found. Commands not registered.", guildId);
-            }
-        } else {
-            log.warn("Guild ID not found in configuration file. Command not registered.");
-        }
+    private static boolean isCorrectGuild(@Nullable Guild guild) {
+        String guildId = Config.getConfigString(GUILD_ID_KEY);
+        return guild != null && guild.getId().equals(guildId);
     }
 
     private static boolean isCorrectChannel(@NotNull SlashCommandInteractionEvent event) {
-        return event.getChannel().getId().equals(CONFIG.getProperty(CHANNEL_ID_KEY));
+        return event.getChannel().getId().equals(Config.getConfigString(CHANNEL_ID_KEY));
     }
 
     private static boolean isCorrectChannel(@NotNull String channelId) {
-        return channelId.equals(CONFIG.getProperty(CHANNEL_ID_KEY));
-    }
-
-    private static boolean isCorrectGuild(@Nullable Guild guild) {
-        String guildId = CONFIG.getProperty(GUILD_ID_KEY);
-        return guild != null && guild.getId().equals(guildId);
+        return channelId.equals(Config.getConfigString(CHANNEL_ID_KEY));
     }
 
     private static boolean hasAdminRole(@NotNull MessageReceivedEvent event) {
         if (event.getMember() == null) return false;
-        String adminRoleId = CONFIG.getProperty(ADMIN_ROLE_ID_KEY);
+
+        String adminRoleId = Config.getConfigString(ADMIN_ROLE_ID_KEY);
         return event.getMember().getRoles().stream()
                 .anyMatch(role -> role.getId().equals(adminRoleId));
     }
 
     private static void handleVerify(@NotNull SlashCommandInteractionEvent event, @NotNull User user) {
         if (isAlreadyVerified(event)) {
-            replyEphemeral(event, "message.verify.already_verified");
+            replyEphemeral(event, "messages.verify.already-verified");
             return;
         }
 
         String nickname = getUsernameOption(event);
         if (nickname == null) {
-            replyEphemeral(event, "message.verify.usage");
+            replyEphemeral(event, "messages.verify.usage");
             return;
         }
 
         String code = generateCode();
         VERIFICATION_CODES.put(user.getId(), nickname + "#" + code);
-        replyEphemeral(event, "message.verify.instruction", "{code}", code);
+        replyEphemeral(event, "messages.verify.instruction", "{code}", code);
     }
 
     private static void handleDone(@NotNull SlashCommandInteractionEvent event, @NotNull User user) {
         if (isAlreadyVerified(event)) {
-            replyEphemeral(event, "message.verify.already_verified");
+            replyEphemeral(event, "messages.verify.already-verified");
             return;
         }
 
         String data = VERIFICATION_CODES.getIfPresent(user.getId());
         if (data == null) {
-            replyEphemeral(event, "message.done.no_verify");
+            replyEphemeral(event, "messages.done.no-verify");
             return;
         }
 
@@ -210,28 +234,26 @@ public class Main extends ListenerAdapter {
     }
 
     private static void handleReload(@NotNull SlashCommandInteractionEvent event) {
-        if (!isAdmin(event)) {
-            return;
-        }
+        if (!isAdmin(event)) return;
         loadConfig();
-        replyEphemeral(event, "message.reload.success");
+        replyEphemeral(event, "messages.reload.success");
     }
 
     private static boolean isAdmin(@NotNull SlashCommandInteractionEvent event) {
         if (event.getMember() == null) return false;
 
-        String adminRoleId = CONFIG.getProperty(ADMIN_ROLE_ID_KEY);
+        String adminRoleId = Config.getConfigString(ADMIN_ROLE_ID_KEY);
         boolean isAdmin = event.getMember().getRoles().stream()
                 .anyMatch(role -> role.getId().equals(adminRoleId));
         if (!isAdmin) {
-            replyEphemeral(event, "message.reload.no_permission");
+            replyEphemeral(event, "messages.reload.no-permission");
         }
         return isAdmin;
     }
 
     private static boolean isAlreadyVerified(@NotNull SlashCommandInteractionEvent event) {
         if (event.getMember() == null) return false;
-        String verifyRoleId = CONFIG.getProperty(VERIFY_ROLE_ID_KEY);
+        String verifyRoleId = Config.getConfigString(VERIFY_ROLE_ID_KEY);
         return event.getMember().getRoles().stream()
                 .anyMatch(role -> role.getId().equals(verifyRoleId));
     }
@@ -244,7 +266,7 @@ public class Main extends ListenerAdapter {
     private static @NotNull String generateCode() {
         int code = RANDOM.nextInt((int) Math.pow(10, CODE_LENGTH));
         String verificationCode = String.format("%0" + CODE_LENGTH + "d", code);
-        return CONFIG.getProperty(CODE_FORMAT_KEY).replace("{generated_code}", verificationCode);
+        return Objects.requireNonNull(Config.getConfigString(CODE_FORMAT_KEY), "message " + CODE_FORMAT_KEY + " not found in config!").replace("{generated_code}", verificationCode);
     }
 
     private static void verifyUser(@NotNull SlashCommandInteractionEvent event, @NotNull User user, @NotNull String data) {
@@ -253,73 +275,28 @@ public class Main extends ListenerAdapter {
         String code = parts[1].replaceAll("\\s+", "");
 
         try {
-            int userId = fetchSpigotUserId(nickname);
-            if (userId == INVALID_ID) {
-                replyEphemeral(event, "message.verify.discord.identifier.user_not_found", "{username}", nickname);
+            int userId = Spigot.fetchSpigotUserId(nickname);
+            if (userId == Spigot.INVALID_ID) {
+                replyEphemeral(event, "messages.verify.discord.identifier.user-not-found", "{username}", nickname);
                 return;
             }
 
-            String discordTag = fetchSpigotUserDiscord(userId);
+            String discordTag = Spigot.fetchSpigotUserDiscord(userId);
             if (discordTag == null) {
-                replyEphemeral(event, "message.verify.discord.identifier.tag_not_found", "{code}", code);
+                replyEphemeral(event, "messages.verify.discord.identifier.tag-not-found", "{code}", code);
                 return;
             }
 
             if (discordTag.equals(code)) {
-                replyEphemeral(event, "message.verify.success");
+                replyEphemeral(event, "messages.verify.success");
                 assignVerificationRoles(event);
                 VERIFICATION_CODES.invalidate(user.getId());
             } else {
-                replyEphemeral(event, "message.verify.failure", "{actual_info}", discordTag, "{code}", code);
+                replyEphemeral(event, "messages.verify.failure", "{actual_info}", discordTag, "{code}", code);
             }
         } catch (Exception e) {
             log.error("Error verifying user", e);
-            replyEphemeral(event, "message.verify.error");
-        }
-    }
-
-    private static int fetchSpigotUserId(@NotNull String nickname) throws Exception {
-        String url = "https://api.spigotmc.org/simple/0.2/index.php?action=findAuthor&name=" + nickname
-                + "&t=" + System.currentTimeMillis();
-        String response = makeApiRequest(url);
-        if (response == null) return INVALID_ID;
-
-        JSONObject json = new JSONObject(response);
-        return json.has("id") ? json.getInt("id") : INVALID_ID;
-    }
-
-    private static @Nullable String fetchSpigotUserDiscord(int userId) throws Exception {
-        if (userId == INVALID_ID) return null;
-
-        String url = "https://api.spigotmc.org/simple/0.2/index.php?action=getAuthor&id=" + userId
-                + "&t=" + System.currentTimeMillis();
-        String response = makeApiRequest(url);
-        if (response == null) return null;
-
-        JSONObject json = new JSONObject(response);
-        return json.has("identities") && json.getJSONObject("identities").has("discord")
-                ? json.getJSONObject("identities").getString("discord")
-                : null;
-    }
-
-    private static @Nullable String makeApiRequest(@NotNull String url) throws Exception {
-        Request request = new Request.Builder()
-                .url(url)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-                .header("Cache-Control", "no-cache, no-store, must-revalidate")
-                .header("Pragma", "no-cache")
-                .header("Expires", "0")
-                .build();
-
-        try (Response response = CLIENT.newCall(request).execute()) {
-            if (!response.isSuccessful()) {
-                log.error("API request failed: HTTP {}", response.code());
-                return null;
-            }
-            @Cleanup ResponseBody body = response.body();
-            if (body == null) return null;
-
-            return body.string();
+            replyEphemeral(event, "messages.verify.error");
         }
     }
 
@@ -330,13 +307,8 @@ public class Main extends ListenerAdapter {
             return;
         }
 
-        assignRole(guild, event, CONFIG.getProperty(VERIFY_ROLE_ID_KEY));
-        String roleIdsString = CONFIG.getProperty(ASSIGN_ROLE_IDS_KEY);
-        if (roleIdsString != null && !roleIdsString.isEmpty()) {
-            Arrays.stream(roleIdsString.split(","))
-                    .map(String::trim)
-                    .forEach(roleId -> assignRole(guild, event, roleId));
-        }
+        assignRole(guild, event, Objects.requireNonNull(Config.getConfigString(VERIFY_ROLE_ID_KEY), "message " + VERIFY_ROLE_ID_KEY + " not found in config!"));
+        Objects.requireNonNull(Config.getConfigStringList(ASSIGN_ROLES_KEY), "list " + ASSIGN_ROLES_KEY + " not found!").forEach(roleId -> assignRole(guild, event, roleId));
     }
 
     private static void assignRole(@NotNull Guild guild, @NotNull SlashCommandInteractionEvent event, @NotNull String roleId) {
@@ -353,23 +325,10 @@ public class Main extends ListenerAdapter {
     }
 
     private static void replyEphemeral(@NotNull SlashCommandInteractionEvent event, @NotNull String messageKey, @NotNull String... replacements) {
-        String message = CONFIG.getProperty(messageKey);
+        String message = Objects.requireNonNull(Config.getConfigString(messageKey), "Message not found in config: " + messageKey);
         for (int i = 0; i < replacements.length; i += 2) {
             message = message.replace(replacements[i], replacements[i + 1]);
         }
         event.getHook().sendMessage(message).setEphemeral(true).queue();
-    }
-
-    private static void loadConfig() {
-        try (InputStream input = Main.class.getClassLoader().getResourceAsStream("config.properties")) {
-            if (input == null) {
-                log.error("Can't find config.properties");
-                return;
-            }
-            CONFIG.load(input);
-            log.info("Configuration loaded successfully!");
-        } catch (Exception e) {
-            log.error("Got an exception while loading config.properties", e);
-        }
     }
 }
